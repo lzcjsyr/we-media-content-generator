@@ -13,3 +13,5 @@
 
 # 只跟踪 summary 目录
 !summary/
+
+.env
