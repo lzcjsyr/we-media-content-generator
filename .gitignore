@@ -5,11 +5,7 @@
 # 确保 summary 目录下的所有内容都被跟踪
 !/summary/**
 
-# 跟踪所有文件
-!*.*
-
-# 忽略 .env 文件
+# 忽略系统文件
 .env
-
-# 确保 .gitignore 被跟踪
-!.gitignore
+.DS_Store
+**/.DS_Store
