@@ -1,0 +1,5 @@
+openai==1.9.0
+python-dotenv==1.0.0
+python-docx==1.0.0
+ebooklib==0.18.0
+beautifulsoup4==4.12.2

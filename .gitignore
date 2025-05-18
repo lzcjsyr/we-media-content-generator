@@ -1,0 +1,15 @@
+# 默认忽略所有文件
+*/
+!.gitignore
+
+# 跟踪所有的 .py 文件
+!*.py
+
+# 跟踪 requirements.txt
+!requirements.txt
+
+# 跟踪 README.md
+!README.md
+
+# 只跟踪 summary 目录
+!summary/
