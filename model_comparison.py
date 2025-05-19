@@ -66,7 +66,6 @@ def create_comparison_report(results, output_dir):
     style.element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
     style.font.size = Pt(12)
 
-
     # 添加文档标题
     add_section(doc, '模型比较报告', level=0)
     doc.add_paragraph('本报告对比了不同模型生成的内容效果，包括标题和段落内容。')
