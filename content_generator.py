@@ -49,7 +49,7 @@ def read_input_file(file_path):
         print(f"读取文件时出错: {e}")
         return None
 
-def generate_content_with_title(content, output_dir=None, model=OPENROUTER_GEMINI_MODEL, reqs=""):
+def generate_content_with_title(content, output_dir=None, model=OPENROUTER_GEMINI_MODEL, reqs="", temperature=0.7):
 
     try:
         # 如果有额外要求，添加到提示词中
@@ -66,7 +66,7 @@ def generate_content_with_title(content, output_dir=None, model=OPENROUTER_GEMIN
                 {"role": "user", "content": user_content}
             ],
             max_tokens=6000,
-            temperature=0.5,
+            temperature=temperature,
             response_format={"type": "json_object"}
         )
         
@@ -341,7 +341,10 @@ def create_docx_report_native(content_json, images, output_dir, image_mode=1):
         print(f"创建 DOCX 报告时发生严重错误: {e}")
         raise
 
-def main(image_mode=1, model=OPENROUTER_GEMINI_MODEL, reqs=""):
+def main(image_mode=1, model=OPENROUTER_GEMINI_MODEL, reqs="", temperature=0.7):
+    # 验证temperature参数
+    if not (0 <= temperature <= 1):
+        raise ValueError("temperature参数必须在0到1之间")
 
     # 读取输入并验证
     content = read_input_file("input.txt")
@@ -359,7 +362,7 @@ def main(image_mode=1, model=OPENROUTER_GEMINI_MODEL, reqs=""):
     
     # 生成内容
     print(f"正在生成文章内容，使用模型：{model}...")
-    result = generate_content_with_title(content, output_dir, model=model, reqs=reqs)
+    result = generate_content_with_title(content, output_dir, model=model, reqs=reqs, temperature=temperature)
     if not isinstance(result, dict) or "paragraphs" not in result or not isinstance(result["paragraphs"], list):
         print("错误: 内容生成返回无效结果")
         return
@@ -436,6 +439,11 @@ if __name__ == "__main__":
         使用额外要求:
         - 在reqs参数中传入字符串，例如：
           main(reqs="文章风格要正式，使用专业术语")
+        
+        控制生成随机性:
+        - temperature: 控制生成文本的随机性，范围0-1，值越大随机性越强，默认0.7
+          例如: main(temperature=0.5)  # 更确定性的输出
+               main(temperature=0.9)  # 更有创意的输出
     """
     
-    main(image_mode=2, model=OPENROUTER_CLAUDE_MODEL, reqs="文章风格生动活泼，像好友聊天")
+    main(image_mode=3, model=OPENROUTER_DS_R1_MODEL, reqs="文章风格生动活泼，像好友聊天", temperature=0.7)

@@ -132,7 +132,10 @@ def create_comparison_report(results, output_dir):
     print(f"模型比较报告已保存: {doc_path}")
     return doc_path
 
-def main(reqs=""):
+def main(reqs="", temperature=0.7):
+    # 验证temperature参数
+    if not (0 <= temperature <= 1):
+        raise ValueError("temperature参数必须在0到1之间")
     # 读取输入
     content = read_input_file("input.txt")
     if not content:
@@ -164,7 +167,7 @@ def main(reqs=""):
         
         # 生成内容
         try:
-            result = generate_content_with_title(content, output_dir=model_dir, model=model_id, reqs=reqs)
+            result = generate_content_with_title(content, output_dir=model_dir, model=model_id, reqs=reqs, temperature=temperature)
             results[model_name] = result
             
             # 保存JSON结果到子目录
@@ -201,6 +204,11 @@ if __name__ == "__main__":
         使用额外要求:
         - 在reqs参数中传入字符串，例如：
           main(reqs="文章风格要正式，使用专业术语")
+        
+        控制生成随机性:
+        - temperature: 控制生成文本的随机性，范围0-1，值越大随机性越强，默认0.7
+          例如: main(temperature=0.5)  # 更确定性的输出
+               main(temperature=0.9)  # 更有创意的输出
     """
     
-    main(reqs="文章风格生动活泼，像好友聊天")
+    main(reqs="文章风格生动活泼，像好友聊天", temperature=0.7)
