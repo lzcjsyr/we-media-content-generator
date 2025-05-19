@@ -22,134 +22,118 @@ from content_generator import (
     OPENROUTER_DS_R1_MODEL
 )
 
-def set_heading_font(heading):
-    """Set font for heading to Times New Roman/宋体"""
-    if heading.runs:
-        run = heading.runs[0]
-        run.font.name = 'Times New Roman'
-        if not run._element.rPr:
-            run._element.get_or_add_rPr()
-        run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
-
 def create_comparison_report(results, output_dir):
     """创建包含所有模型生成内容的比较报告"""
     doc = Document()
     
-    # 设置默认字体为宋体
+    def set_font(element, size=None):
+        """设置元素的字体"""
+        if not hasattr(element, 'runs'):
+            return
+            
+        for run in element.runs:
+            run.font.name = 'Times New Roman'
+            if not run._element.rPr:
+                run._element.get_or_add_rPr()
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
+            if size:
+                run.font.size = size
+
+    def add_section(doc, title, level=1):
+        """添加标题部分"""
+        heading = doc.add_heading(title, level=level)
+        set_font(heading, size=Pt(18) if level == 0 else None)
+        return heading
+
+    def create_table(doc, headers, rows, style='Table Grid'):
+        """创建表格并填充数据"""
+        table = doc.add_table(rows=len(rows) + 1, cols=len(headers))
+        table.style = style
+        
+        # 设置表头
+        for i, header in enumerate(headers):
+            table.cell(0, i).text = str(header)
+        
+        # 填充数据
+        for i, row in enumerate(rows, 1):
+            for j, cell in enumerate(row):
+                table.cell(i, j).text = str(cell)
+        return table
+
+    # 设置默认字体
     style = doc.styles['Normal']
-    style.font.name = 'Times New Roman'  # 英文字体
-    style.element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')  # 中文字体
+    style.font.name = 'Times New Roman'
+    style.element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
     style.font.size = Pt(12)
-    
+
+
     # 添加文档标题
-    title = doc.add_heading('模型比较报告', level=0)
-    if title.runs:
-        title_run = title.runs[0]
-        title_run.font.name = 'Times New Roman'
-        if not title_run._element.rPr:
-            title_run._element.get_or_add_rPr()
-        title_run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
-        title_run.font.size = Pt(18)
-    
-    # 添加说明
+    add_section(doc, '模型比较报告', level=0)
     doc.add_paragraph('本报告对比了不同模型生成的内容效果，包括标题和段落内容。')
-    doc.add_paragraph(f'生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
-    doc.add_paragraph()
-    
+    doc.add_paragraph(f'生成时间: {datetime.now().strftime("%m-%d %H:%M")}\n')
+
     # 1. 标题比较部分
-    heading = doc.add_heading('一、标题比较', level=1)
-    set_heading_font(heading)
+    add_section(doc, '一、标题比较')
+    
+    # 准备标题数据
+    models = ['Gemini', 'Claude', 'DeepSeek']
+    title_data = []
+    for i in range(1, 4):
+        row = [f'标题 {i}']
+        for model in [m.lower() for m in models]:
+            content = results.get(model, {})
+            if isinstance(content, dict):
+                row.append(str(content.get(f'title_{i}', '未生成')))
+            else:
+                row.append(str(content) if i == 1 else 'N/A')
+        title_data.append(row)
     
     # 创建标题比较表格
-    title_table = doc.add_table(rows=4, cols=4)
-    title_table.style = 'Table Grid'
-    
-    # 表头
-    title_table.cell(0, 0).text = "标题方案"
-    title_table.cell(0, 1).text = "Gemini"
-    title_table.cell(0, 2).text = "Claude"
-    title_table.cell(0, 3).text = "DeepSeek"
-    
-    # 填充标题比较内容
-    for i in range(1, 4):
-        key = f"title_{i}"
-        title_table.cell(i, 0).text = f"标题 {i}"
-        title_table.cell(i, 1).text = results["gemini"].get(key, "未生成")
-        title_table.cell(i, 2).text = results["claude"].get(key, "未生成")
-        title_table.cell(i, 3).text = results["deepseek"].get(key, "未生成")
-    
+    create_table(doc, ['标题方案'] + models, title_data)
     doc.add_paragraph()
-    
+
     # 2. 段落内容比较
-    heading = doc.add_heading('二、正文内容比较', level=1)
-    set_heading_font(heading)
+    add_section(doc, '二、正文内容比较')
     
-    # 获取每个模型生成的段落数量
-    gemini_paragraphs = results["gemini"].get("paragraphs", [])
-    claude_paragraphs = results["claude"].get("paragraphs", [])
-    deepseek_paragraphs = results["deepseek"].get("paragraphs", [])
-    
-    # 计算最大段落数
-    max_paragraphs = max(
-        len(gemini_paragraphs),
-        len(claude_paragraphs),
-        len(deepseek_paragraphs)
-    )
-    
-    # 遍历所有段落，进行比较
+    # 获取所有段落的段落数据
+    paragraphs_data = {
+        model.lower(): results.get(model.lower(), {}).get('paragraphs', []) 
+        if isinstance(results.get(model.lower()), dict) 
+        else [] 
+        for model in models
+    }
+    max_paragraphs = max(len(paragraphs) for paragraphs in paragraphs_data.values())
+
+    # 遍历所有段落
     for i in range(max_paragraphs):
-        section_heading = doc.add_heading(f'段落 {i+1}', level=2)
-        set_heading_font(section_heading)
+        add_section(doc, f'段落 {i+1}', level=2)
         
         # 小标题比较
-        heading = doc.add_heading('小标题比较:', level=3)
-        set_heading_font(heading)
-        subtitle_table = doc.add_table(rows=2, cols=3)
-        subtitle_table.style = 'Table Grid'
-        
-        # 表头
-        subtitle_table.cell(0, 0).text = "Gemini"
-        subtitle_table.cell(0, 1).text = "Claude"
-        subtitle_table.cell(0, 2).text = "DeepSeek"
-        
-        # 填充小标题
-        subtitle_table.cell(1, 0).text = gemini_paragraphs[i].get("subtitle", "无小标题") if i < len(gemini_paragraphs) else "无内容"
-        subtitle_table.cell(1, 1).text = claude_paragraphs[i].get("subtitle", "无小标题") if i < len(claude_paragraphs) else "无内容"
-        subtitle_table.cell(1, 2).text = deepseek_paragraphs[i].get("subtitle", "无小标题") if i < len(deepseek_paragraphs) else "无内容"
-        
+        add_section(doc, '小标题比较:', level=3)
+        subtitles = [
+            paragraphs[i].get('subtitle', '无小标题') if i < len(paragraphs) else '无内容'
+            for paragraphs in paragraphs_data.values()
+        ]
+        create_table(doc, models, [subtitles])
         doc.add_paragraph()
-        
+
         # 段落内容比较
-        heading = doc.add_heading('段落内容比较:', level=3)
-        set_heading_font(heading)
-        
-        # Gemini 内容
-        heading = doc.add_heading('Gemini:', level=4)
-        set_heading_font(heading)
-        gemini_content = gemini_paragraphs[i].get("content", "无内容") if i < len(gemini_paragraphs) else "无内容"
-        doc.add_paragraph(gemini_content)
-        
-        # Claude 内容
-        heading = doc.add_heading('Claude:', level=4)
-        set_heading_font(heading)
-        claude_content = claude_paragraphs[i].get("content", "无内容") if i < len(claude_paragraphs) else "无内容"
-        doc.add_paragraph(claude_content)
-        
-        # DeepSeek 内容
-        heading = doc.add_heading('DeepSeek:', level=4)
-        set_heading_font(heading)
-        deepseek_content = deepseek_paragraphs[i].get("content", "无内容") if i < len(deepseek_paragraphs) else "无内容"
-        doc.add_paragraph(deepseek_content)
-        
+        add_section(doc, '段落内容比较:', level=3)
+        for model in models:
+            add_section(doc, f'{model}:', level=4)
+            content = '无内容'
+            if i < len(paragraphs_data[model.lower()]):
+                content = paragraphs_data[model.lower()][i].get('content', '无内容')
+            doc.add_paragraph(content)
         doc.add_paragraph()
-    
+
     # 保存文档
     doc_path = os.path.join(output_dir, "model_comparison.docx")
     doc.save(doc_path)
     print(f"模型比较报告已保存: {doc_path}")
     return doc_path
 
-def main():
+def main(reqs=""):
     # 读取输入
     content = read_input_file("input.txt")
     if not content:
@@ -181,7 +165,7 @@ def main():
         
         # 生成内容
         try:
-            result = generate_content_with_title(content, model_dir, model=model_id)
+            result = generate_content_with_title(content, output_dir=model_dir, model=model_id, reqs=reqs)
             results[model_name] = result
             
             # 保存JSON结果到子目录
@@ -213,4 +197,11 @@ def main():
         print("所有模型生成失败，无法创建比较报告")
 
 if __name__ == "__main__":
-    main()
+
+    """
+        使用额外要求:
+        - 在reqs参数中传入字符串，例如：
+          main(reqs="文章风格要正式，使用专业术语")
+    """
+    
+    main(reqs="文章风格生动活泼，像好友聊天")

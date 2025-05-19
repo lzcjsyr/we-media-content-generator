@@ -49,8 +49,6 @@ if missing_vars:
 openrouter = OpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL)
 aihubmix = OpenAI(api_key=AIHUBMIX_API_KEY, base_url=AIHUBMIX_BASE_URL)
 
-# 提示词和图像生成参数现在从 prompts.py 导入
-
 def read_input_file(file_path):
     """读取输入文件内容"""
     try:
@@ -60,17 +58,21 @@ def read_input_file(file_path):
         print(f"读取文件时出错: {e}")
         return None
 
-def generate_content_with_title(content, output_dir=None, model=OPENROUTER_GEMINI_MODEL):
-    """生成包含多个标题和正文的JSON，并可选保存到指定目录"""
-    
+def generate_content_with_title(content, output_dir=None, model=OPENROUTER_GEMINI_MODEL, reqs=""):
+
     try:
+        # 如果有额外要求，添加到提示词中
+        user_content = content
+        if reqs:
+            user_content = f"{content}\n\n额外要求：{reqs}"
+            
         print("\n开始API调用...")
         # API调用获取内容，直接指定返回JSON格式
         response = openrouter.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": content}
+                {"role": "user", "content": user_content}
             ],
             max_tokens=6000,
             temperature=0.5,
@@ -79,11 +81,17 @@ def generate_content_with_title(content, output_dir=None, model=OPENROUTER_GEMIN
         
         # 获取响应内容
         response_content = response.choices[0].message.content.strip()
-        print(f"\nAPI返回内容: {response_content[:100]}...")
+        print(f"\nAPI返回内容长度: {len(response_content)} 字符")
         
         try:
-            # 直接使用json_repair解析JSON
-            result = json.loads(json_repair.repair_json(response_content))
+            # 尝试直接解析JSON
+            try:
+                result = json.loads(response_content)
+            except json.JSONDecodeError:
+                print("检测到JSON格式问题，尝试修复...")
+                # 使用json_repair修复JSON
+                result = json.loads(json_repair.repair_json(response_content))
+            
             print("成功解析JSON响应")
             
             # 确保输出目录存在
@@ -93,9 +101,15 @@ def generate_content_with_title(content, output_dir=None, model=OPENROUTER_GEMIN
             else:
                 json_path = "content.json"
                 
-            # 保存解析后的JSON
-            with open(json_path, 'w', encoding='utf-8') as f:
+            # 保存解析后的JSON，确保使用UTF-8编码
+            with open(json_path, 'w', encoding='utf-8', errors='replace') as f:
                 json.dump(result, f, ensure_ascii=False, indent=2)
+            
+            # 验证保存的文件
+            with open(json_path, 'r', encoding='utf-8') as f:
+                saved_content = f.read()
+                print(f"已保存JSON文件大小: {len(saved_content)} 字节")
+                
             print(f"JSON内容已保存到: {json_path}")
             
             return result
@@ -336,12 +350,16 @@ def create_docx_report_native(content_json, images, output_dir, image_mode=1):
         print(f"创建 DOCX 报告时发生严重错误: {e}")
         raise
 
-def main(image_mode=1, model=OPENROUTER_GEMINI_MODEL):
+def main(image_mode=1, model=OPENROUTER_GEMINI_MODEL, reqs=""):
+
     # 读取输入并验证
     content = read_input_file("input.txt")
     if not content:
         print("无法读取输入文件 input.txt，程序终止")
         return
+    
+    if reqs:
+        print("检测到额外要求，将整合到提示词中")
     
     # 创建输出目录
     timestamp = datetime.now().strftime("%m%d_%H%M")
@@ -350,7 +368,7 @@ def main(image_mode=1, model=OPENROUTER_GEMINI_MODEL):
     
     # 生成内容
     print(f"正在生成文章内容，使用模型：{model}...")
-    result = generate_content_with_title(content, output_dir, model=model)
+    result = generate_content_with_title(content, output_dir, model=model, reqs=reqs)
     if not isinstance(result, dict) or "paragraphs" not in result or not isinstance(result["paragraphs"], list):
         print("错误: 内容生成返回无效结果")
         return
@@ -423,6 +441,10 @@ if __name__ == "__main__":
         - 使用Claude 3.7 Sonnet: model=OPENROUTER_CLAUDE_MODEL
         - 使用DeepSeek R1: model=OPENROUTER_DS_R1_MODEL
         - 使用Gemini 2.5 Pro: model=OPENROUTER_GEMINI_MODEL
+        
+        使用额外要求:
+        - 在reqs参数中传入字符串，例如：
+          main(reqs="文章风格要正式，使用专业术语")
     """
-
-    main(image_mode = 1, model = OPENROUTER_CLAUDE_MODEL)
+    
+    main(image_mode=2, model=OPENROUTER_CLAUDE_MODEL, reqs="文章风格生动活泼，像好友聊天")
