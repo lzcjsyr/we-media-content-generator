@@ -1,17 +1,15 @@
 import os
 import json
 import base64
-from dotenv import load_dotenv
-from datetime import datetime
 import time
 import re
-import json_repair
+from datetime import datetime
+from dotenv import load_dotenv
 from openai import OpenAI
-import docx
+import json_repair
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.oxml.ns import qn
-# 导入提示词
 from prompts import (
     SYSTEM_PROMPT, IMAGE_STYLE_PROMPT, IMAGE_SIZE, IMAGE_QUALITY, IMAGE_MODERATION, IMAGE_BACKGROUND
 )
@@ -446,4 +444,9 @@ if __name__ == "__main__":
                main(temperature=0.9)  # 更有创意的输出
     """
     
-    main(image_mode=3, model=OPENROUTER_DS_R1_MODEL, reqs="文章风格生动活泼，像好友聊天", temperature=0.7)
+    main(
+            image_mode=3, 
+            model=OPENROUTER_DS_R1_MODEL, 
+            reqs="文章风格生动活泼，像好友聊天", 
+            temperature=0.7
+        )
