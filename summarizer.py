@@ -60,13 +60,28 @@ client = OpenAI(
 def extract_text_from_epub(epub_path):
     """使用ebooklib和BeautifulSoup从EPUB文件中提取文本。"""
     try:
-        return '\n\n'.join(
-            BeautifulSoup(item.get_content().decode('utf-8'), 'html.parser')
-            .decompose_scripts_and_styles()
-            .get_text(' ', strip=True)
-            for item in epub.read_epub(epub_path).get_items()
-            if item.get_type() == ebooklib.ITEM_DOCUMENT
-        )
+        text_parts = []
+        book = epub.read_epub(epub_path)
+        
+        for item in book.get_items():
+            if item.get_type() == ebooklib.ITEM_DOCUMENT:
+                try:
+                    content = item.get_content().decode('utf-8')
+                    soup = BeautifulSoup(content, 'html.parser')
+                    
+                    # 移除script和style标签
+                    for script in soup(["script", "style"]):
+                        script.decompose()
+                    
+                    # 提取文本
+                    text = soup.get_text(' ', strip=True)
+                    if text:
+                        text_parts.append(text)
+                except Exception as e:
+                    print(f"  处理EPUB章节时出错: {e}")
+                    continue
+        
+        return '\n\n'.join(text_parts)
     except Exception as e:
         print(f"从{epub_path}提取文本时出错: {e}")
         return ""
