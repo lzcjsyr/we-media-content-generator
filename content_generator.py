@@ -153,21 +153,44 @@ def generate_and_save_image(paragraph, output_dir, index):
         print(f"图片生成失败: {e}")
         return None
 
-def create_docx_report_native(content_json, images, output_dir, image_mode=1):
+def create_docx_report_native(content_json, images, output_dir, image_mode=1, model_name=""):
     """创建Word文档报告"""
     doc = Document()
     
-    # 简化的样式设置函数
-    def add_styled_text(container, text, size=12, bold=False):
+    # 设置文档默认字体，支持emoji显示
+    doc.styles['Normal'].font.name = 'Apple Color Emoji'  # 支持emoji
+    doc.styles['Normal']._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+    doc.styles['Normal'].font.size = Pt(12)
+    
+    # 改进的样式设置函数，支持emoji
+    def add_styled_text(container, text, size=12, bold=False, font_name='微软雅黑'):
         run = container.add_run(text)
+        # 设置支持emoji的字体
+        run.font.name = font_name
         run.font.size = Pt(size)
         run.bold = bold
+        # 设置字体支持emoji
+        run._element.rPr.rFonts.set(qn('w:eastAsia'), font_name)
+        # 添加emoji支持
+        if any(ord(char) > 127 for char in text):  # 包含非ASCII字符（可能是emoji）
+            run.font.name = 'Segoe UI Emoji'  # Windows emoji字体
+            run._element.rPr.rFonts.set(qn('w:cs'), 'Segoe UI Emoji')
         return run
     
     # 添加文档标题
     heading = doc.add_heading(level=0)
+    heading.clear()  # 清除默认内容
     add_styled_text(heading, "文章标题方案生成报告", size=20, bold=True)
     doc.add_paragraph()
+    
+    # 处理整篇文章配图（模式2）- 放在标题表格上面
+    if image_mode == 2 and images and images[0]:
+        image_path = os.path.join(output_dir, images[0])
+        if os.path.exists(image_path):
+            pic_paragraph = doc.add_paragraph()
+            pic_paragraph.alignment = 1  # 居中
+            pic_paragraph.add_run().add_picture(image_path, width=Inches(5.0))
+            doc.add_paragraph()
     
     # 创建标题比较表格
     table = doc.add_table(rows=4, cols=2)
@@ -176,29 +199,42 @@ def create_docx_report_native(content_json, images, output_dir, image_mode=1):
     # 表格标题
     headers = ["标题编号", "标题内容"]
     for i, header in enumerate(headers):
-        add_styled_text(table.rows[0].cells[i].paragraphs[0], header, bold=True)
+        cell_para = table.rows[0].cells[i].paragraphs[0]
+        cell_para.clear()
+        add_styled_text(cell_para, header, size=12, bold=True)
     
     # 添加三个标题方案
     title_names = ["标题一", "标题二", "标题三"]
     for i in range(1, 4):
         row = table.rows[i]
-        add_styled_text(row.cells[0].paragraphs[0], title_names[i-1])
-        add_styled_text(row.cells[1].paragraphs[0], content_json.get(f"title_{i}", "自媒体文章"))
+        # 标题编号
+        cell_para_1 = row.cells[0].paragraphs[0]
+        cell_para_1.clear()
+        add_styled_text(cell_para_1, title_names[i-1], size=12)
+        
+        # 标题内容
+        cell_para_2 = row.cells[1].paragraphs[0]
+        cell_para_2.clear()
+        add_styled_text(cell_para_2, content_json.get(f"title_{i}", "自媒体文章"), size=12)
     
     # 添加文章内容标题
     doc.add_paragraph()
     content_heading = doc.add_heading(level=0)
+    content_heading.clear()
     add_styled_text(content_heading, "文章内容", size=18, bold=True)
     doc.add_paragraph()
     
-    # 处理整篇文章配图（模式2）
-    if image_mode == 2 and images and images[0]:
-        image_path = os.path.join(output_dir, images[0])
-        if os.path.exists(image_path):
-            pic_paragraph = doc.add_paragraph()
-            pic_paragraph.alignment = 1  # 居中
-            pic_paragraph.add_run().add_picture(image_path, width=Inches(5.0))
-            doc.add_paragraph()
+    # 添加引言部分
+    introduction = content_json.get("introduction", "")
+    if introduction:
+        intro_heading = doc.add_heading(level=1)
+        intro_heading.clear()
+        intro_heading.alignment = 1  # 居中对齐
+        add_styled_text(intro_heading, "—— 引言 ——", size=14, bold=True)
+        
+        intro_para = doc.add_paragraph()
+        add_styled_text(intro_para, introduction, size=12)
+        doc.add_paragraph()
     
     # 添加段落内容
     paragraphs = content_json.get("paragraphs", [])
@@ -209,11 +245,13 @@ def create_docx_report_native(content_json, images, output_dir, image_mode=1):
         # 添加子标题
         if subtitle:
             subheading = doc.add_heading(level=1)
-            add_styled_text(subheading, subtitle, size=14, bold=True)
+            subheading.clear()
+            subheading.alignment = 1  # 居中对齐
+            add_styled_text(subheading, f"—— {subtitle} ——", size=14, bold=True)
         
         # 添加段落内容
         para = doc.add_paragraph()
-        add_styled_text(para, content or "[内容缺失]")
+        add_styled_text(para, content or "[内容缺失]", size=12)
         
         # 添加段落配图（模式1）
         if image_mode == 1 and i < len(images) and images[i]:
@@ -223,6 +261,13 @@ def create_docx_report_native(content_json, images, output_dir, image_mode=1):
                 pic_paragraph.alignment = 1  # 居中
                 pic_paragraph.add_run().add_picture(image_path, width=Inches(5.0))
                 doc.add_paragraph()
+    
+    # 添加模型信息
+    if model_name:
+        doc.add_paragraph()
+        model_para = doc.add_paragraph()
+        model_para.alignment = 2  # 右对齐
+        add_styled_text(model_para, f"Generated by: {model_name}", size=9)
     
     # 保存文档
     doc_path = os.path.join(output_dir, "report.docx")
@@ -270,15 +315,18 @@ def main(image_mode=1, model=OPENROUTER_GEMINI_MODEL, reqs="", temperature=0.7):
                     image_count += 1
     
     elif image_mode == 2:  # 整篇一张图
-        print("正在生成文章配图...")
-        all_content = " ".join([p.get("content", "")[:100] for p in paragraphs])[:500]
-        image_filename = generate_and_save_image(all_content, output_dir, 0)
+        print("正在生成文章封面配图...")
+        # 使用introduction和标题作为封面图生成依据
+        title = result.get("title_1", "")
+        introduction = result.get("introduction", "")
+        cover_content = f"{title}。{introduction}"
+        image_filename = generate_and_save_image(cover_content, output_dir, 0)
         if image_filename:
             images[0] = image_filename
             image_count = 1
     
     # 生成Word文档
-    create_docx_report_native(result, images, output_dir, image_mode)
+    create_docx_report_native(result, images, output_dir, image_mode, model)
     
     # 输出结果
     print(f"\n生成完成! 保存至: {output_dir}")
@@ -310,7 +358,7 @@ if __name__ == "__main__":
     """
     
     main(
-            image_mode=3, 
+            image_mode=2, 
             model=OPENROUTER_DS_R1_MODEL, 
             reqs="文章风格生动活泼，像好友聊天", 
             temperature=0.7
