@@ -4,6 +4,7 @@ import base64
 import time
 import re
 import sys
+import requests
 from datetime import datetime
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -19,38 +20,57 @@ from prompts import (
 load_dotenv()
 
 # 环境变量配置
-required_env_vars = {
-    "OPENROUTER_API_KEY": os.getenv("OPENROUTER_API_KEY"),
-    "OPENROUTER_BASE_URL": os.getenv("OPENROUTER_BASE_URL"),
-    "OPENROUTER_Claude_3.7_Sonnet": os.getenv("OPENROUTER_Claude_3.7_Sonnet"),
-    "OPENROUTER_Gemini_2.5_Pro": os.getenv("OPENROUTER_Gemini_2.5_Pro"),
-    "OPENROUTER_DeepSeek_R1": os.getenv("OPENROUTER_DeepSeek_R1"),
-    "AIHUBMIX_API_KEY": os.getenv("AIHUBMIX_API_KEY"),
-    "AIHUBMIX_BASE_URL": os.getenv("AIHUBMIX_BASE_URL"),
-    "AIHUBMIX_IMAGE_GENERATION_MODEL": os.getenv("AIHUBMIX_IMAGE_GENERATION_MODEL")
-}
+required_vars = [
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_BASE_URL", 
+    "OPENROUTER_Claude_3.7_Sonnet",
+    "OPENROUTER_Gemini_2.5_Pro",
+    "OPENROUTER_DeepSeek_R1",
+    "AIHUBMIX_API_KEY",
+    "AIHUBMIX_BASE_URL",
+    "AIHUBMIX_IMAGE_GENERATION_MODEL"
+]
 
 # 检查必要环境变量
-missing_vars = [var for var, value in required_env_vars.items() if not value]
+missing_vars = [var for var in required_vars if not os.getenv(var)]
 if missing_vars:
     print(f"错误: 缺少环境变量: {', '.join(missing_vars)}")
     print("请创建 .env 文件并设置这些变量")
     sys.exit(1)
 
 # 设置模型变量
-OPENROUTER_CLAUDE_MODEL = required_env_vars["OPENROUTER_Claude_3.7_Sonnet"]
-OPENROUTER_GEMINI_MODEL = required_env_vars["OPENROUTER_Gemini_2.5_Pro"]
-OPENROUTER_DS_R1_MODEL = required_env_vars["OPENROUTER_DeepSeek_R1"]
+OPENROUTER_CLAUDE_MODEL = os.getenv("OPENROUTER_Claude_3.7_Sonnet")
+OPENROUTER_GEMINI_MODEL = os.getenv("OPENROUTER_Gemini_2.5_Pro")
+OPENROUTER_DS_R1_MODEL = os.getenv("OPENROUTER_DeepSeek_R1")
 
 # 初始化API客户端
 openrouter = OpenAI(
-    api_key=required_env_vars["OPENROUTER_API_KEY"],
-    base_url=required_env_vars["OPENROUTER_BASE_URL"]
+    api_key=os.getenv("OPENROUTER_API_KEY"),
+    base_url=os.getenv("OPENROUTER_BASE_URL")
 )
 aihubmix = OpenAI(
-    api_key=required_env_vars["AIHUBMIX_API_KEY"],
-    base_url=required_env_vars["AIHUBMIX_BASE_URL"]
+    api_key=os.getenv("AIHUBMIX_API_KEY"),
+    base_url=os.getenv("AIHUBMIX_BASE_URL")
 )
+
+# 初始化ARK客户端（可选）
+ark_api_key = os.getenv("ARK_API_KEY")
+ark_base_url = os.getenv("ARK_BASE_URL")
+if ark_api_key and ark_base_url:
+    ark_client = OpenAI(
+        api_key=ark_api_key,
+        base_url=ark_base_url
+    )
+    print("ARK图像生成服务已初始化")
+else:
+    ark_client = None
+    print("ARK环境变量未配置，仅使用AIHUBMIX服务")
+
+# 图像生成模型定义
+IMAGE_MODELS = {
+    "GPT-Image": "aihubmix",
+    "Seedream": "ark"
+}
 
 def read_input_file(file_path):
     """读取输入文件内容"""
@@ -107,46 +127,73 @@ def generate_content_with_title(content, output_dir=None, model=OPENROUTER_GEMIN
         print(f"生成内容错误: {e}")
         return {"error": str(e)}
 
-def generate_and_save_image(paragraph, output_dir, index):
+def generate_and_save_image(paragraph, output_dir, index, image_model="GPT-Image"):
     """基于段落生成图片并保存到指定目录"""
+    
     if not paragraph:
         print("警告: 段落内容为空，无法生成图片")
         return None
         
-    print(f"正在生成图片 {index}...")
+    print(f"正在使用 {image_model} 生成图片 {index}...")
+    
+    # 确定使用的服务
+    service = IMAGE_MODELS.get(image_model, "aihubmix")
     
     try:
-        # 生成图片
-        response = aihubmix.images.generate(
-            model=required_env_vars["AIHUBMIX_IMAGE_GENERATION_MODEL"],
-            prompt=f"{paragraph}{IMAGE_STYLE_PROMPT}",
-            n=1,
-            size=IMAGE_SIZE,
-            quality=IMAGE_QUALITY,
-            moderation=IMAGE_MODERATION,
-            background=IMAGE_BACKGROUND
-        )
+        # API调用
+        if service == "aihubmix":
+            response = aihubmix.images.generate(
+                model=os.getenv("AIHUBMIX_IMAGE_GENERATION_MODEL"),
+                prompt=f"{paragraph}{IMAGE_STYLE_PROMPT}",
+                n=1,
+                size=IMAGE_SIZE,
+                quality=IMAGE_QUALITY,
+                moderation=IMAGE_MODERATION,
+                background=IMAGE_BACKGROUND
+            )
+        elif service == "ark":
+            if not ark_client:
+                print("错误: ARK客户端未初始化，请检查环境变量配置")
+                return None
+            response = ark_client.images.generate(
+                model=os.getenv("ARK_SeeDream_MODEL"),
+                prompt=f"{paragraph}{IMAGE_STYLE_PROMPT}",
+                size=IMAGE_SIZE,
+                response_format="url"
+            )
+        else:
+            print(f"错误: 未知的图像生成服务: {service}")
+            return None
         
         if not response.data:
             print("错误: 未收到有效的图片数据")
             return None
-            
-        # 保存图片
-        os.makedirs(output_dir, exist_ok=True)
-        image_data = response.data[0]
-        image_bytes = base64.b64decode(image_data.b64_json)
-        file_name = f"image_{index}.png"
         
-        # 避免文件名冲突
+        # 准备保存路径
+        os.makedirs(output_dir, exist_ok=True)
+        file_name = f"image_{index}.png"
         file_path = os.path.join(output_dir, file_name)
         if os.path.exists(file_path):
             file_name = f"image_{index}_{int(time.time())}.png"
             file_path = os.path.join(output_dir, file_name)
-            
-        with open(file_path, "wb") as f:
-            f.write(image_bytes)
         
-        print(f"图片已保存: {file_name}")
+        # 保存图片
+        if service == "aihubmix":
+            image_data = response.data[0]
+            image_bytes = base64.b64decode(image_data.b64_json)
+            with open(file_path, "wb") as f:
+                f.write(image_bytes)
+        else:  # service == "ark"
+            image_url = response.data[0].url
+            img_response = requests.get(image_url)
+            if img_response.status_code == 200:
+                with open(file_path, "wb") as f:
+                    f.write(img_response.content)
+            else:
+                print(f"图片下载失败: HTTP {img_response.status_code}")
+                return None
+        
+        print(f"图片已保存: {file_name} (使用 {image_model})")
         return file_name
         
     except Exception as e:
@@ -274,11 +321,33 @@ def create_docx_report_native(content_json, images, output_dir, image_mode=1, mo
     doc.save(doc_path)
     print(f"DOCX报告已生成: {doc_path}")
 
-def main(image_mode=1, model=OPENROUTER_GEMINI_MODEL, reqs="", temperature=0.7):
+def validate_image_model(image_model):
+    """
+    验证图像模型的可用性。
+    
+    Args:
+        image_model (str): 图像模型名称
+        
+    Returns:
+        tuple: (is_valid, error_message)
+    """
+    if image_model not in IMAGE_MODELS:
+        return False, f"不支持的图像模型 '{image_model}'，支持的模型: {', '.join(IMAGE_MODELS.keys())}"
+    elif image_model == "Seedream" and not ark_client:
+        return False, "Seedream模型需要配置ARK环境变量"
+    return True, ""
+
+def main(image_mode=1, model=OPENROUTER_GEMINI_MODEL, reqs="", temperature=0.7, image_model="Seedream"):
     # 读取输入文件
     content = read_input_file("input.txt")
     if not content:
         print("无法读取输入文件 input.txt")
+        return
+    
+    # 验证图像模型选择和可用性
+    is_valid, error_message = validate_image_model(image_model)
+    if not is_valid:
+        print(error_message)
         return
     
     # 创建输出目录
@@ -306,21 +375,21 @@ def main(image_mode=1, model=OPENROUTER_GEMINI_MODEL, reqs="", temperature=0.7):
     image_count = 0
     
     if image_mode == 1:  # 每段一张图
-        print("正在生成段落配图...")
+        print(f"正在使用 {image_model} 生成段落配图...")
         for i, p in enumerate(paragraphs):
             if p.get("content"):
-                image_filename = generate_and_save_image(p["content"], output_dir, i + 1)
+                image_filename = generate_and_save_image(p["content"], output_dir, i + 1, image_model)
                 if image_filename:
                     images[i] = image_filename
                     image_count += 1
     
     elif image_mode == 2:  # 整篇一张图
-        print("正在生成文章封面配图...")
+        print(f"正在使用 {image_model} 生成文章封面配图...")
         # 使用introduction和标题作为封面图生成依据
         title = result.get("title_1", "")
         introduction = result.get("introduction", "")
         cover_content = f"{title}。{introduction}"
-        image_filename = generate_and_save_image(cover_content, output_dir, 0)
+        image_filename = generate_and_save_image(cover_content, output_dir, 0, image_model)
         if image_filename:
             images[0] = image_filename
             image_count = 1
@@ -332,7 +401,7 @@ def main(image_mode=1, model=OPENROUTER_GEMINI_MODEL, reqs="", temperature=0.7):
     print(f"\n生成完成! 保存至: {output_dir}")
     for i in range(1, 4):
         print(f"  标题{i}: {result.get(f'title_{i}', '无标题')}")
-    print(f"  文件: report.docx, content.json, {image_count}张配图")
+    print(f"  文件: report.docx, content.json, {image_count}张配图 (使用 {image_model})")
 
 if __name__ == "__main__":
     """
@@ -347,6 +416,10 @@ if __name__ == "__main__":
         - 使用DeepSeek R1: model=OPENROUTER_DS_R1_MODEL
         - 使用Gemini 2.5 Pro: model=OPENROUTER_GEMINI_MODEL
         
+        使用不同图像生成模型:
+        - 使用GPT-Image (GPT-4o): image_model="GPT-Image"
+        - 使用Seedream (豆包的即梦3.0): image_model="Seedream"
+        
         使用额外要求:
         - 在reqs参数中传入字符串，例如：
           main(reqs="文章风格要正式，使用专业术语")
@@ -359,7 +432,8 @@ if __name__ == "__main__":
     
     main(
             image_mode=2, 
-            model=OPENROUTER_DS_R1_MODEL, 
+            model=OPENROUTER_CLAUDE_MODEL, 
             reqs="文章风格生动活泼，像好友聊天", 
-            temperature=0.7
+            temperature=0.7,
+            image_model="GPT-Image"
         )
