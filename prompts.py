@@ -72,6 +72,6 @@ IMAGE_STYLE_PROMPT = "\n\n有视觉冲击的电影宣传海报质感，超高清
 
 # 图像生成的其他参数
 IMAGE_SIZE = "1536x1024"
-IMAGE_QUALITY = "low"
+IMAGE_QUALITY = "high"
 IMAGE_MODERATION = "low"
 IMAGE_BACKGROUND = "auto"
