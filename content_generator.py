@@ -432,8 +432,8 @@ if __name__ == "__main__":
     
     main(
             image_mode=2, 
-            model=OPENROUTER_CLAUDE_MODEL, 
+            model=OPENROUTER_GEMINI_MODEL, 
             reqs="文章风格生动活泼，像好友聊天", 
             temperature=0.7,
-            image_model="GPT-Image"
+            image_model="Seedream"
         )

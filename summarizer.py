@@ -130,7 +130,7 @@ def summarize_with_llm(epub_text, journal_name, publication_date):
 
     try:
         response = client.chat.completions.create(
-            model=os.getenv("OPENROUTER_Gemini_2.5_Flash"),
+            model=os.getenv("OPENROUTER_Gemini_2.5_Pro"),
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
             max_tokens=30000,
@@ -350,7 +350,7 @@ def process_magazine(magazine_type, base_output_dir="summary"):
                     continue
                 
                 # 使用LLM进行摘要
-                print(f"  正在使用Gemini 2.5 Flash进行摘要...")
+                print(f"  正在使用Gemini 2.5 Pro进行摘要...")
                 summary_data = summarize_with_llm(
                     epub_text, 
                     config['name'], 
