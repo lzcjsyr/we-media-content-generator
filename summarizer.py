@@ -7,6 +7,7 @@ import json
 import re
 import sys
 import argparse
+import subprocess
 from datetime import datetime
 import docx
 from docx.oxml.ns import qn
@@ -18,6 +19,9 @@ from dotenv import load_dotenv
 
 # 加载环境变量
 load_dotenv()
+
+# Git仓库路径
+REPO_PATH = "/Users/dielangli/Documents/文件/Books/awesome-english-ebooks"
 
 # 杂志配置信息
 MAGAZINE_CONFIG = {
@@ -56,6 +60,117 @@ client = OpenAI(
     base_url=os.getenv("OPENROUTER_BASE_URL"),
     api_key=os.getenv("OPENROUTER_API_KEY")
 )
+
+def check_and_update_repo():
+    """检查并更新Git仓库到最新版本"""
+    if not os.path.exists(REPO_PATH):
+        print(f"错误：仓库路径不存在: {REPO_PATH}")
+        return False
+    
+    # 检查是否为Git仓库
+    git_dir = os.path.join(REPO_PATH, '.git')
+    if not os.path.exists(git_dir):
+        print(f"错误：{REPO_PATH} 不是一个Git仓库")
+        return False
+    
+    try:
+        print(f"正在检查Git仓库更新状态...")
+        print(f"仓库路径: {REPO_PATH}")
+        
+        # 切换到仓库目录
+        os.chdir(REPO_PATH)
+        
+        # 获取远程更新信息
+        print("  正在获取远程更新信息...")
+        result = subprocess.run(['git', 'fetch'], 
+                              capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            print(f"  获取远程信息失败: {result.stderr}")
+            return False
+        
+        # 获取当前分支名
+        result = subprocess.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], 
+                              capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            print(f"  获取分支名失败: {result.stderr}")
+            return False
+        current_branch = result.stdout.strip()
+        
+        # 比较本地和远程分支的最新提交
+        result = subprocess.run(['git', 'rev-parse', 'HEAD'], 
+                              capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            print(f"  获取本地提交失败: {result.stderr}")
+            return False
+        local_commit = result.stdout.strip()
+        
+        result = subprocess.run(['git', 'rev-parse', f'origin/{current_branch}'], 
+                              capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            print(f"  获取远程提交失败: {result.stderr}")
+            return False
+        remote_commit = result.stdout.strip()
+        
+        # 检查状态并决定如何更新
+        result = subprocess.run(['git', 'status', '-uno'], 
+                              capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            print(f"  检查状态失败: {result.stderr}")
+            return False
+        
+        status_output = result.stdout
+        print(f"  当前状态: {status_output.split('Your branch')[1].split('Your branch')[0].strip() if 'Your branch' in status_output else '未知'}")
+        
+        if local_commit != remote_commit:
+            if "Your branch is behind" in status_output:
+                print("  发现仓库有更新，正在执行 git pull...")
+                
+                # 执行git pull
+                result = subprocess.run(['git', 'pull'], 
+                                      capture_output=True, text=True, timeout=60)
+                
+                if result.returncode == 0:
+                    print("  ✓ 仓库更新成功!")
+                    if result.stdout.strip():
+                        # 只显示重要的更新信息，不显示太多细节
+                        lines = result.stdout.strip().split('\n')
+                        important_lines = [line for line in lines if 'files changed' in line or 'insertions' in line or 'deletions' in line]
+                        if important_lines:
+                            print(f"  更新详情: {' '.join(important_lines)}")
+                else:
+                    print(f"  ✗ 仓库更新失败: {result.stderr}")
+                    return False
+                    
+            elif "have diverged" in status_output:
+                print("  检测到分支分叉，正在尝试强制更新到远程版本...")
+                print("  警告：这将丢弃本地的更改")
+                
+                # 强制重置到远程分支
+                result = subprocess.run(['git', 'reset', '--hard', f'origin/{current_branch}'], 
+                                      capture_output=True, text=True, timeout=30)
+                
+                if result.returncode == 0:
+                    print("  ✓ 仓库已强制更新到远程版本!")
+                else:
+                    print(f"  ✗ 强制更新失败: {result.stderr}")
+                    return False
+            else:
+                print("  ✓ 检测到更新但状态复杂，建议手动处理")
+                return False
+        else:
+            print("  ✓ 仓库已经是最新版本")
+        
+        return True
+        
+    except subprocess.TimeoutExpired:
+        print("  错误：Git操作超时")
+        return False
+    except subprocess.CalledProcessError as e:
+        print(f"  错误：Git命令执行失败: {e}")
+        return False
+    except Exception as e:
+        print(f"  错误：检查更新时发生异常: {e}")
+        return False
 
 def extract_text_from_epub(epub_path):
     """使用ebooklib和BeautifulSoup从EPUB文件中提取文本。"""
@@ -115,7 +230,8 @@ def summarize_with_llm(epub_text, journal_name, publication_date):
   "publication_date": "{publication_date}",
   "articles": [
     {{
-      "title": "文章标题示例1",
+      "title": "标题示例1",
+      "Chinese_title": "对应的中文标题示例1",
       "summary": "这是第一篇文章的摘要示例，摘要应该简洁明确，避免使用复杂或专业的术语，除非这些术语是理解文章的关键。在撰写摘要时，应保持客观，准确反映原文的观点，而不是提供个人的观点或评价。最后，摘要应该结构良好，有逻辑性，以便读者能易于理解和跟进文章的内容和论点。"
     }}
   ]
@@ -152,6 +268,25 @@ def summarize_with_llm(epub_text, journal_name, publication_date):
         
     except (json.JSONDecodeError, ValueError) as e:
         print(f"处理LLM响应时出错: {e}")
+        print(f"LLM响应内容前500字符: {content[:500] if content else 'None'}")
+        
+        # 尝试清理响应内容
+        if content:
+            # 移除可能的markdown代码块标记
+            cleaned_content = content.strip()
+            if cleaned_content.startswith('```json'):
+                cleaned_content = cleaned_content[7:]
+            if cleaned_content.endswith('```'):
+                cleaned_content = cleaned_content[:-3]
+            cleaned_content = cleaned_content.strip()
+            
+            try:
+                data = json.loads(cleaned_content)
+                print("  清理后的内容解析成功")
+                return data
+            except json.JSONDecodeError as e2:
+                print(f"  清理后仍然解析失败: {e2}")
+                print(f"  清理后内容前200字符: {cleaned_content[:200]}")
     except Exception as e:
         print(f"调用LLM时出错: {e}")
     return None
@@ -203,7 +338,18 @@ def create_docx_report(json_files, output_path, magazine_title="杂志"):
             
             # 添加文章
             for article in data.get('articles', []):
-                doc.add_heading(article.get('title', '未知标题'), 2)
+                # 构建文章标题，如果有中文标题则同时显示
+                english_title = article.get('title', '未知标题')
+                chinese_title = article.get('Chinese_title', '')
+                
+                if chinese_title:
+                    # 如果有中文标题，格式为："中文标题 (English Title)"
+                    full_title = f"{chinese_title} ({english_title})"
+                else:
+                    # 如果没有中文标题，只显示英文标题
+                    full_title = english_title
+                
+                doc.add_heading(full_title, 2)
                 doc.add_paragraph(article.get('summary', '无可用摘要'))
             
             # 在期刊之间添加分页符
@@ -398,7 +544,35 @@ def main():
         help="摘要输出的基础目录 (默认: summary)"
     )
     
+    # 添加跳过Git检查的选项
+    parser.add_argument(
+        "--skip-git-check",
+        action="store_true",
+        help="跳过Git仓库更新检查"
+    )
+    
     args = parser.parse_args()
+    
+    # 检查并更新Git仓库（除非用户选择跳过）
+    if not args.skip_git_check:
+        print("=" * 60)
+        print("【Git仓库更新检查】")
+        print("=" * 60)
+        
+        # 保存当前工作目录
+        original_cwd = os.getcwd()
+        
+        try:
+            if not check_and_update_repo():
+                print("\n警告：Git仓库更新检查失败，但程序将继续运行...")
+                print("如果需要跳过Git检查，请使用 --skip-git-check 参数\n")
+            else:
+                print()
+        finally:
+            # 恢复原始工作目录
+            os.chdir(original_cwd)
+    else:
+        print("已跳过Git仓库更新检查\n")
     
     # 在用户选择前先显示所有期刊的文件统计信息
     print("正在收集文件统计信息...") 
