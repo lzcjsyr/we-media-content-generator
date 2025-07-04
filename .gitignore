@@ -1,9 +1,11 @@
-# 忽略所有顶层目录（除了 summary）
+# 忽略所有顶层目录（除了 摘要汇总 和 functions）
 /*/
-!/summary
+!/摘要汇总
+!/functions
 
-# 确保 summary 目录下的所有内容都被跟踪
-!/summary/**
+# 确保目录下的所有内容都被跟踪
+!/摘要汇总/**
+!/functions/**
 
 # 忽略系统文件
 .env

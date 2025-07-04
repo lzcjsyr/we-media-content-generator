@@ -10,7 +10,7 @@ import argparse
 from datetime import datetime
 from dotenv import load_dotenv
 from openai import OpenAI
-from prompts import IMAGE_STYLE_PROMPT, IMAGE_SIZE, IMAGE_QUALITY, IMAGE_MODERATION, IMAGE_BACKGROUND
+from .prompts import IMAGE_STYLE_PROMPT, IMAGE_SIZE, IMAGE_QUALITY, IMAGE_MODERATION, IMAGE_BACKGROUND
 
 # 加载环境变量
 load_dotenv()
@@ -70,7 +70,14 @@ def validate_image_model(image_model):
         return False, "Seedream模型需要配置ARK环境变量"
     return True, ""
 
-def generate_image(prompt, output_dir="images", filename=None, image_model="GPT-Image", count=1):
+def get_default_output_dir():
+    """获取默认的独立图片输出目录"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(script_dir)  # 内容生成器目录
+    grandparent_dir = os.path.dirname(parent_dir)  # 期刊系列内容生成目录
+    return os.path.join(grandparent_dir, "独立图片")
+
+def generate_image(prompt, output_dir=None, filename=None, image_model="GPT-Image", count=1):
     """
     生成图片并保存到指定目录
     
@@ -88,6 +95,10 @@ def generate_image(prompt, output_dir="images", filename=None, image_model="GPT-
     if not prompt:
         print("错误: 图片描述文本不能为空")
         return []
+    
+    # 如果没有指定输出目录，使用默认目录
+    if output_dir is None:
+        output_dir = get_default_output_dir()
         
     # 验证图像模型
     is_valid, error_message = validate_image_model(image_model)
@@ -205,7 +216,7 @@ def generate_image(prompt, output_dir="images", filename=None, image_model="GPT-
         print(f"图片生成失败: {e}")
         return []
 
-def generate_batch_images(prompts, output_dir="images", image_model="GPT-Image"):
+def generate_batch_images(prompts, output_dir=None, image_model="GPT-Image"):
     """
     批量生成图片
     
@@ -217,6 +228,10 @@ def generate_batch_images(prompts, output_dir="images", image_model="GPT-Image")
     Returns:
         list: 成功生成的文件路径列表
     """
+    # 如果没有指定输出目录，使用默认目录
+    if output_dir is None:
+        output_dir = get_default_output_dir()
+        
     successful_files = []
     
     for i, prompt in enumerate(prompts):
@@ -261,8 +276,8 @@ def main():
     
     parser.add_argument(
         "-o", "--output",
-        default="images",
-        help="输出目录 (默认: images)"
+        default=None,
+        help="输出目录 (默认: 自动计算到独立图片文件夹)"
     )
     
     parser.add_argument(
@@ -359,7 +374,7 @@ if __name__ == "__main__":
     # 生成图片
     file_paths = generate_image(
         prompt=prompt, 
-        output_dir="images", 
+        output_dir=None,  # 使用默认目录
         filename="trump",
         image_model="GPT-Image",
         count=1

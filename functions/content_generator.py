@@ -1,3 +1,26 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+自媒体内容生成器
+
+功能：
+- 基于输入文本生成自媒体文章标题和内容
+- 生成配图（支持多种AI图像模型）
+- 创建Word报告文档
+
+使用方法：
+    python content_generator.py
+
+输入：
+    input.txt - 包含要转换为自媒体文章的原始内容
+
+输出：
+    在 ../完整作品/ 目录下生成：
+    - content.json - 结构化的文章数据
+    - report.docx - 格式化的Word报告
+    - image_*.png - 生成的配图
+"""
+
 import os
 import json
 import base64
@@ -12,7 +35,7 @@ import json_repair
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.oxml.ns import qn
-from prompts import (
+from .prompts import (
     SYSTEM_PROMPT, IMAGE_STYLE_PROMPT, IMAGE_SIZE, IMAGE_QUALITY, IMAGE_MODERATION, IMAGE_BACKGROUND
 )
 
@@ -75,10 +98,19 @@ IMAGE_MODELS = {
 def read_input_file(file_path):
     """读取输入文件内容"""
     try:
-        with open(file_path, 'r', encoding='utf-8') as file:
-            return file.read()
+        # 使用相对于脚本的路径 - input.txt在上级目录
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        parent_dir = os.path.dirname(script_dir)  # 向上一级到内容生成器目录
+        full_path = os.path.join(parent_dir, file_path)
+        
+        with open(full_path, 'r', encoding='utf-8') as file:
+            content = file.read()
+        return content
+            
     except Exception as e:
         print(f"读取文件时出错: {e}")
+        print(f"脚本所在目录: {os.path.dirname(__file__)}")
+        print(f"尝试读取的文件: {file_path}")
         return None
 
 def generate_content_with_title(content, output_dir=None, model=OPENROUTER_GEMINI_MODEL, reqs="", temperature=0.7):
@@ -127,7 +159,9 @@ def generate_content_with_title(content, output_dir=None, model=OPENROUTER_GEMIN
         print(f"生成内容错误: {e}")
         return {"error": str(e)}
 
-def generate_and_save_image(paragraph, output_dir, index, image_model="GPT-Image"):
+def generate_and_save_image(paragraph, output_dir, index, image_model="GPT-Image", 
+                           image_style="", image_size="1536x1024", image_quality="high", 
+                           image_moderation="low", image_background="auto"):
     """基于段落生成图片并保存到指定目录"""
     
     if not paragraph:
@@ -139,17 +173,20 @@ def generate_and_save_image(paragraph, output_dir, index, image_model="GPT-Image
     # 确定使用的服务
     service = IMAGE_MODELS.get(image_model, "aihubmix")
     
+    # 使用传入的图像样式或默认样式
+    style_prompt = image_style if image_style else IMAGE_STYLE_PROMPT
+    
     try:
         # API调用
         if service == "aihubmix":
             response = aihubmix.images.generate(
                 model=os.getenv("AIHUBMIX_IMAGE_GENERATION_MODEL"),
-                prompt=f"{paragraph}{IMAGE_STYLE_PROMPT}",
+                prompt=f"{paragraph}{style_prompt}",
                 n=1,
-                size=IMAGE_SIZE,
-                quality=IMAGE_QUALITY,
-                moderation=IMAGE_MODERATION,
-                background=IMAGE_BACKGROUND
+                size=image_size,
+                quality=image_quality,
+                moderation=image_moderation,
+                background=image_background
             )
         elif service == "ark":
             if not ark_client:
@@ -157,8 +194,8 @@ def generate_and_save_image(paragraph, output_dir, index, image_model="GPT-Image
                 return None
             response = ark_client.images.generate(
                 model=os.getenv("ARK_SeeDream_MODEL"),
-                prompt=f"{paragraph}{IMAGE_STYLE_PROMPT}",
-                size=IMAGE_SIZE,
+                prompt=f"{paragraph}{style_prompt}",
+                size=image_size,
                 response_format="url"
             )
         else:
@@ -337,7 +374,11 @@ def validate_image_model(image_model):
         return False, "Seedream模型需要配置ARK环境变量"
     return True, ""
 
-def main(image_mode=1, model=OPENROUTER_GEMINI_MODEL, reqs="", temperature=0.7, image_model="Seedream"):
+
+def main(image_mode=1, model=OPENROUTER_GEMINI_MODEL, reqs="", temperature=0.7, image_model="Seedream",
+         image_style="\n\n有视觉冲击的电影宣传海报质感，超高清展示，细节清晰，没有文字。",
+         image_size="1536x1024", image_quality="high", image_moderation="low", image_background="auto"):
+    
     # 读取输入文件
     content = read_input_file("input.txt")
     if not content:
@@ -350,9 +391,14 @@ def main(image_mode=1, model=OPENROUTER_GEMINI_MODEL, reqs="", temperature=0.7, 
         print(error_message)
         return
     
-    # 创建输出目录
+    # 创建输出目录 - 使用相对路径
     timestamp = datetime.now().strftime("%m%d_%H%M")
-    output_dir = f"content_{timestamp}"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(script_dir)  # 内容生成器目录
+    grandparent_dir = os.path.dirname(parent_dir)  # 期刊系列内容生成目录
+    base_output_dir = os.path.join(grandparent_dir, "完整作品")
+    os.makedirs(base_output_dir, exist_ok=True)
+    output_dir = os.path.join(base_output_dir, f"content_{timestamp}")
     
     # 生成内容
     print(f"正在生成文章内容，使用模型：{model}")
@@ -364,7 +410,7 @@ def main(image_mode=1, model=OPENROUTER_GEMINI_MODEL, reqs="", temperature=0.7, 
     # 重命名目录为更友好的名称
     title = result.get("title_1", "未命名文章")
     clean_title = re.sub(r'[^\w\u4e00-\u9fff]', '', title)[:20]  # 保留中文和字母数字
-    title_dir = f"{clean_title}_{timestamp}"
+    title_dir = os.path.join(base_output_dir, f"{clean_title}_{timestamp}")
     if not os.path.exists(title_dir):
         os.rename(output_dir, title_dir)
         output_dir = title_dir
@@ -378,7 +424,10 @@ def main(image_mode=1, model=OPENROUTER_GEMINI_MODEL, reqs="", temperature=0.7, 
         print(f"正在使用 {image_model} 生成段落配图...")
         for i, p in enumerate(paragraphs):
             if p.get("content"):
-                image_filename = generate_and_save_image(p["content"], output_dir, i + 1, image_model)
+                image_filename = generate_and_save_image(
+                    p["content"], output_dir, i + 1, image_model,
+                    image_style, image_size, image_quality, image_moderation, image_background
+                )
                 if image_filename:
                     images[i] = image_filename
                     image_count += 1
@@ -389,7 +438,10 @@ def main(image_mode=1, model=OPENROUTER_GEMINI_MODEL, reqs="", temperature=0.7, 
         title = result.get("title_1", "")
         introduction = result.get("introduction", "")
         cover_content = f"{title}。{introduction}"
-        image_filename = generate_and_save_image(cover_content, output_dir, 0, image_model)
+        image_filename = generate_and_save_image(
+            cover_content, output_dir, 0, image_model,
+            image_style, image_size, image_quality, image_moderation, image_background
+        )
         if image_filename:
             images[0] = image_filename
             image_count = 1
@@ -406,34 +458,47 @@ def main(image_mode=1, model=OPENROUTER_GEMINI_MODEL, reqs="", temperature=0.7, 
 if __name__ == "__main__":
     """
     主程序入口
-    使用示例：
-        1. 为每个章节生成配图: main(image_mode=1)
-        2. 为整篇文章生成一张配图: main(image_mode=2)
-        3. 不生成任何配图: main(image_mode=3)
+    
+    参数说明:
+        image_mode: 图像生成模式
+            1 - 为每个章节生成配图
+            2 - 为整篇文章生成一张配图
+            3 - 不生成任何配图
         
-        使用不同模型:
-        - 使用Claude 3.7 Sonnet: model=OPENROUTER_CLAUDE_MODEL
-        - 使用DeepSeek R1: model=OPENROUTER_DS_R1_MODEL
-        - 使用Gemini 2.5 Pro: model=OPENROUTER_GEMINI_MODEL
+        model: AI文本生成模型
+            OPENROUTER_CLAUDE_MODEL - Claude 3.7 Sonnet
+            OPENROUTER_DS_R1_MODEL - DeepSeek R1
+            OPENROUTER_GEMINI_MODEL - Gemini 2.5 Pro
         
-        使用不同图像生成模型:
-        - 使用GPT-Image (GPT-4o): image_model="GPT-Image"
-        - 使用Seedream (豆包的即梦3.0): image_model="Seedream"
+        image_model: 图像生成模型
+            "GPT-Image" - GPT-4o图像生成
+            "Seedream" - 豆包的即梦3.0
         
-        使用额外要求:
-        - 在reqs参数中传入字符串，例如：
-          main(reqs="文章风格要正式，使用专业术语")
+        图像质量参数 (新增):
+            image_style: 图像风格提示词，默认为电影海报风格
+            image_size: 图像尺寸，可选 "1024x1024", "1536x1024", "1792x1024", "1024x1792"
+            image_quality: 图像质量，可选 "low", "standard", "high"
+            image_moderation: 内容审查级别，可选 "low", "medium", "high"
+            image_background: 背景设置，可选 "auto", "transparent"
         
-        控制生成随机性:
-        - temperature: 控制生成文本的随机性，范围0-1，值越大随机性越强，默认0.7
-          例如: main(temperature=0.5)  # 更确定性的输出
-               main(temperature=0.9)  # 更有创意的输出
+        其他参数:
+            reqs: 额外的创作要求
+            temperature: 生成随机性 (0-1)，值越大越有创意
+    
+    输出目录:
+        所有生成的文件将保存到父级目录的"完整作品"文件夹中
     """
     
     main(
             image_mode=2, 
             model=OPENROUTER_CLAUDE_MODEL, 
-            reqs="文章风格生动活泼，自然流畅", 
+            reqs="文章语言自然流畅，但要通过转折、惊喜、反转等手法，让读者有阅读的欲望。同时让文章有深度，有思考，有启发。", 
             temperature=0.7,
-            image_model="GPT-Image"
+            image_model="GPT-Image",
+            # 图像质量参数 - 可以根据需要调整
+            image_style="\n\n有视觉冲击的电影宣传海报质感，超高清展示，细节清晰，没有文字。",
+            image_size="1536x1024",  # 可选: "1024x1024", "1792x1024", "1024x1792"
+            image_quality="high",    # 可选: "low", "standard", "high"
+            image_moderation="low",  # 可选: "low", "medium", "high"
+            image_background="auto"  # 可选: "auto", "transparent"
         )
