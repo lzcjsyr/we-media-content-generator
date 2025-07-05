@@ -26,7 +26,9 @@ from pathlib import Path
 try:
     from functions.content_generator import main as content_main
     from functions.image_generator import generate_image, generate_batch_images, read_prompts_from_file
-    from functions.summarizer import main as summarizer_main
+    from functions.summarizer import process_magazine
+    from functions.magazine_analyzer import analyze_all_magazines, display_magazine_table
+    from functions.github_updater import check_github_updates, update_repo_if_needed
 except ImportError as e:
     print(f"❌ 模块导入失败: {e}")
     print("请确保已安装所有依赖: pip install -r functions/requirements.txt")
@@ -46,7 +48,9 @@ def print_banner():
 
 def check_input_file():
     """检查input.txt文件是否存在"""
-    input_file = "input.txt"
+    # 确保使用脚本所在目录的input.txt
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    input_file = os.path.join(script_dir, "input.txt")
     if not os.path.exists(input_file):
         print(f"❌ 未找到 {input_file} 文件")
         print("请在当前目录创建 input.txt 文件并添加要处理的内容")
@@ -66,7 +70,17 @@ def check_input_file():
 
 def create_output_directories():
     """创建输出目录"""
-    dirs = ["../完整作品", "../独立图片", "摘要汇总"]
+    # 获取脚本所在目录
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(script_dir)  # 期刊系列内容生成目录
+    
+    # 定义输出目录
+    dirs = [
+        os.path.join(parent_dir, "完整作品"),
+        os.path.join(parent_dir, "独立图片"), 
+        os.path.join(script_dir, "摘要汇总")
+    ]
+    
     for dir_path in dirs:
         os.makedirs(dir_path, exist_ok=True)
         print(f"📁 确保目录存在: {dir_path}")
@@ -112,16 +126,122 @@ def content_generation():
         model = models.get(model_choice, models[1])
     except ValueError:
         print("❌ 输入无效，使用默认模型Claude")
+        model_choice = 1
         model = models[1]
+    
+    print("\n🎯 创作随机性设置:")
+    print("  1. 保守创作 (0.3) - 稳定可靠，逻辑性强")
+    print("  2. 平衡创作 (0.7) - 推荐，创意与稳定兼顾")
+    print("  3. 创意创作 (0.9) - 富有创意，表达多样")
+    print("  4. 自定义数值 (0-1)")
+    
+    try:
+        temp_choice = int(input("\n请选择创作风格 (1-4): "))
+        if temp_choice == 1:
+            temperature = 0.3
+        elif temp_choice == 2:
+            temperature = 0.7
+        elif temp_choice == 3:
+            temperature = 0.9
+        elif temp_choice == 4:
+            try:
+                temperature = float(input("请输入自定义数值 (0-1): "))
+                if temperature < 0 or temperature > 1:
+                    print("❌ 值超出范围，使用默认值0.7")
+                    temperature = 0.7
+            except ValueError:
+                print("❌ 输入无效，使用默认值0.7")
+                temperature = 0.7
+        else:
+            print("❌ 输入无效，使用默认值0.7")
+            temperature = 0.7
+    except ValueError:
+        print("❌ 输入无效，使用默认值0.7")
+        temperature = 0.7
     
     # 额外要求
     reqs = input("\n📋 额外创作要求 (可选，直接回车跳过): ").strip()
     if not reqs:
         reqs = "文章语言自然流畅，但要通过转折、惊喜、反转等手法，让读者有阅读的欲望。同时让文章有深度，有思考，有启发。"
     
+    # 图像生成参数设置
+    print("\n🎨 图像生成配置:")
+    print("  1. 使用默认配置 (推荐) - GPT-Image, 横向, 低质量")
+    print("  2. 自定义配置")
+    
+    try:
+        img_config_choice = int(input("\n请选择图像配置 (1-2): "))
+    except ValueError:
+        print("❌ 输入无效，使用默认配置")
+        img_config_choice = 1
+    
+    # 设置默认值
+    image_model = "GPT-Image"
+    image_style = "\n\n有视觉冲击的电影宣传海报质感，超高清展示，细节清晰，没有文字。"
+    image_size = "1536x1024"
+    image_quality = "low"
+    image_moderation = "low"
+    image_background = "auto"
+    
+    if img_config_choice == 2:
+        print("\n🎨 图像生成模型选择:")
+        print("  1. GPT-Image (推荐) - GPT-4o 图像生成")
+        print("  2. Seedream - 豆包即梦3.0")
+        
+        try:
+            img_model_choice = int(input("\n请选择图像模型 (1-2): "))
+            image_model = "GPT-Image" if img_model_choice == 1 else "Seedream"
+        except ValueError:
+            print("❌ 输入无效，使用默认模型GPT-Image")
+            image_model = "GPT-Image"
+        
+        print("\n🖼️ 图像尺寸选择:")
+        print("  1. 1536x1024 (推荐) - 横向长图")
+        print("  2. 1024x1024 - 正方形")
+        print("  3. 1792x1024 - 超宽横图")
+        print("  4. 1024x1792 - 竖版长图")
+        
+        size_options = {
+            1: "1536x1024",
+            2: "1024x1024", 
+            3: "1792x1024",
+            4: "1024x1792"
+        }
+        
+        try:
+            size_choice = int(input("\n请选择图像尺寸 (1-4): "))
+            image_size = size_options.get(size_choice, "1536x1024")
+        except ValueError:
+            print("❌ 输入无效，使用默认尺寸1536x1024")
+            image_size = "1536x1024"
+        
+        print("\n✨ 图像质量选择:")
+        print("  1. low (推荐) - 低质量，速度快")
+        print("  2. standard - 标准质量")
+        print("  3. high - 高质量，速度慢")
+        
+        quality_options = {1: "low", 2: "standard", 3: "high"}
+        
+        try:
+            quality_choice = int(input("\n请选择图像质量 (1-3): "))
+            image_quality = quality_options.get(quality_choice, "low")
+        except ValueError:
+            print("❌ 输入无效，使用默认质量low")
+            image_quality = "low"
+        
+        print("\n🛡️ 自定义图像风格 (可选):")
+        print("  当前默认: 有视觉冲击的电影宣传海报质感，超高清展示，细节清晰，没有文字")
+        custom_style = input("请输入自定义风格描述 (直接回车使用默认): ").strip()
+        if custom_style:
+            image_style = f"\n\n{custom_style}"
+    
     print(f"\n🚀 开始生成内容...")
     print(f"   图像模式: {['', '每段配图', '封面图片', '无图模式'][image_mode]}")
-    print(f"   AI模型: {['', 'Claude 3.7 Sonnet', 'Gemini 2.5 Pro', 'DeepSeek R1'][model_choice if 'model_choice' in locals() else 1]}")
+    print(f"   AI模型: {['', 'Claude 3.7 Sonnet', 'Gemini 2.5 Pro', 'DeepSeek R1'][model_choice]}")
+    print(f"   创作随机性: {temperature}")
+    print(f"   图像模型: {image_model}")
+    print(f"   图像尺寸: {image_size}")
+    print(f"   图像质量: {image_quality}")
     print(f"   额外要求: {reqs}")
     
     try:
@@ -129,16 +249,16 @@ def content_generation():
             image_mode=image_mode,
             model=model,
             reqs=reqs,
-            temperature=0.7,
-            image_model="GPT-Image",
-            image_style="\n\n有视觉冲击的电影宣传海报质感，超高清展示，细节清晰，没有文字。",
-            image_size="1536x1024",
-            image_quality="high",
-            image_moderation="low",
-            image_background="auto"
+            temperature=temperature,
+            image_model=image_model,
+            image_style=image_style,
+            image_size=image_size,
+            image_quality=image_quality,
+            image_moderation=image_moderation,
+            image_background=image_background
         )
         print("\n✅ 内容生成完成!")
-        print("📁 输出位置: ../完整作品/ 文件夹")
+        print("📁 输出位置: 完整作品/ 文件夹")
     except Exception as e:
         print(f"\n❌ 内容生成失败: {e}")
 
@@ -148,246 +268,124 @@ def image_generation():
     print("🖼️ 独立图片生成模式")
     print("="*50)
     
-    print("\n📋 图片生成方式:")
-    print("  1. 单张图片 - 输入一个描述生成一张图片")
-    print("  2. 批量生成 - 从文件读取多个描述批量生成")
-    print("  3. 交互模式 - 连续输入多个描述")
+    print("\n⚙️ 生成配置选择:")
+    print("  1. 默认配置 (推荐) - GPT-Image模型, 低质量, 横向尺寸")
+    print("  2. 自定义配置 - 可调整所有参数")
     
     try:
-        mode = int(input("\n请选择生成方式 (1-3): "))
+        config_choice = int(input("\n请选择配置方式 (1-2): "))
     except ValueError:
-        print("❌ 输入无效，使用默认模式1")
-        mode = 1
+        print("❌ 输入无效，使用默认配置")
+        config_choice = 1
     
-    if mode == 1:
-        # 单张图片生成
-        prompt = input("\n📝 请输入图片描述: ").strip()
-        if not prompt:
-            print("❌ 图片描述不能为空")
-            return
+    # 设置默认参数
+    image_model = "GPT-Image"
+    image_quality = "low"
+    image_size = "1536x1024"
+    
+    if config_choice == 2:
+        # 自定义配置
+        print("\n🎨 图像生成模型选择:")
+        print("  1. GPT-Image (推荐) - GPT-4o 图像生成")
+        print("  2. Seedream - 豆包即梦3.0")
         
-        filename = input("🏷️ 文件名前缀 (可选): ").strip()
-        
-        print(f"\n🚀 正在生成图片...")
         try:
-            file_paths = generate_image(
-                prompt=prompt,
-                output_dir=None,  # 使用默认目录
-                filename=filename if filename else None,
-                image_model="GPT-Image",
-                count=1
-            )
-            
-            if file_paths:
-                print(f"\n✅ 图片生成成功:")
-                for path in file_paths:
-                    print(f"  📷 {path}")
-            else:
-                print("\n❌ 图片生成失败")
-        except Exception as e:
-            print(f"\n❌ 图片生成失败: {e}")
-    
-    elif mode == 2:
-        # 批量生成
-        batch_file = input("\n📄 批量描述文件路径 (每行一个描述): ").strip()
-        if not batch_file:
-            print("❌ 文件路径不能为空")
-            return
+            model_choice = int(input("\n请选择图像模型 (1-2): "))
+            image_model = "GPT-Image" if model_choice == 1 else "Seedream"
+        except ValueError:
+            print("❌ 输入无效，使用默认模型GPT-Image")
+            image_model = "GPT-Image"
         
-        if not os.path.exists(batch_file):
-            print(f"❌ 文件不存在: {batch_file}")
-            return
+        print("\n✨ 图像质量选择:")
+        print("  1. low - 低质量，速度快")
+        print("  2. standard - 标准质量")
+        print("  3. high - 高质量，速度慢")
         
-        print(f"\n🚀 正在批量生成图片...")
+        quality_options = {1: "low", 2: "standard", 3: "high"}
+        
         try:
-            prompts = read_prompts_from_file(batch_file)
-            if not prompts:
-                print("❌ 未能从文件中读取到有效的描述文本")
-                return
-            
-            print(f"📝 找到 {len(prompts)} 个描述")
-            successful_files = generate_batch_images(prompts, None, "GPT-Image")
-            
-            print(f"\n✅ 批量生成完成! 成功生成 {len(successful_files)} 张图片")
-            print("📁 输出位置: ../独立图片/ 文件夹")
-        except Exception as e:
-            print(f"\n❌ 批量生成失败: {e}")
+            quality_choice = int(input("\n请选择图像质量 (1-3): "))
+            image_quality = quality_options.get(quality_choice, "low")
+        except ValueError:
+            print("❌ 输入无效，使用默认质量low")
+            image_quality = "low"
+        
+        print("\n🖼️ 图像尺寸选择:")
+        print("  1. 1536x1024 - 横向长图")
+        print("  2. 1024x1024 - 正方形")
+        print("  3. 1792x1024 - 超宽横图")
+        print("  4. 1024x1792 - 竖版长图")
+        
+        size_options = {
+            1: "1536x1024",
+            2: "1024x1024", 
+            3: "1792x1024",
+            4: "1024x1792"
+        }
+        
+        try:
+            size_choice = int(input("\n请选择图像尺寸 (1-4): "))
+            image_size = size_options.get(size_choice, "1536x1024")
+        except ValueError:
+            print("❌ 输入无效，使用默认尺寸1536x1024")
+            image_size = "1536x1024"
     
-    elif mode == 3:
-        # 交互模式
-        print("\n🔄 进入交互模式，输入 'quit' 或 'exit' 退出")
-        while True:
-            try:
-                prompt = input("\n📝 请输入图片描述: ").strip()
-                if prompt.lower() in ['quit', 'exit', 'q']:
-                    print("👋 退出交互模式")
-                    break
-                
-                if not prompt:
-                    print("❌ 描述文本不能为空")
-                    continue
-                
-                print(f"🚀 正在生成图片...")
-                file_paths = generate_image(
-                    prompt=prompt,
-                    output_dir=None,  # 使用默认目录
-                    filename=None,
-                    image_model="GPT-Image",
-                    count=1
-                )
-                
-                if file_paths:
-                    print(f"✅ 生成成功:")
-                    for path in file_paths:
-                        print(f"  📷 {path}")
-                else:
-                    print("❌ 生成失败")
-                    
-            except KeyboardInterrupt:
-                print("\n\n👋 退出交互模式")
-                break
-            except Exception as e:
-                print(f"❌ 生成失败: {e}")
-
-def check_github_updates():
-    """检查GitHub上的期刊仓库是否有更新"""
+    # 获取生成参数
+    prompt = input("\n📝 请输入图片描述: ").strip()
+    if not prompt:
+        print("❌ 图片描述不能为空")
+        return
+    
     try:
-        from functions.summarizer import check_and_update_repo, REPO_PATH
-        import subprocess
-        
-        print("\n🔍 检查GitHub期刊仓库更新状态...")
-        
-        # 如果仓库不存在，直接返回需要克隆
-        if not os.path.exists(REPO_PATH):
-            print("📁 本地未发现期刊仓库")
-            return True, "需要克隆仓库"
-        
-        # 检查是否有远程更新
-        try:
-            # 获取远程更新信息
-            subprocess.run(['git', 'fetch'], cwd=REPO_PATH, capture_output=True, timeout=30)
-            
-            # 比较本地和远程提交
-            local_result = subprocess.run(['git', 'rev-parse', 'HEAD'], 
-                                        cwd=REPO_PATH, capture_output=True, text=True)
-            remote_result = subprocess.run(['git', 'rev-parse', 'origin/main'], 
-                                         cwd=REPO_PATH, capture_output=True, text=True)
-            
-            if local_result.returncode == 0 and remote_result.returncode == 0:
-                local_commit = local_result.stdout.strip()
-                remote_commit = remote_result.stdout.strip()
-                
-                if local_commit == remote_commit:
-                    print("✅ 期刊仓库已是最新版本")
-                    return False, "已是最新"
-                else:
-                    print("🆕 发现期刊仓库有更新")
-                    return True, "有新内容"
-            else:
-                print("⚠️ 无法检查更新状态")
-                return False, "检查失败"
-                
-        except Exception as e:
-            print(f"⚠️ 检查更新时出错: {e}")
-            return False, "检查出错"
-            
-    except ImportError:
-        print("❌ 无法导入summarizer模块，请检查依赖")
-        return False, "模块导入失败"
-
-def update_repo_if_needed():
-    """根据用户选择更新仓库"""
+        count = int(input("\n🔢 请输入要生成的图片数量 (1-10): "))
+        if count < 1 or count > 10:
+            print("❌ 数量必须在1-10之间，使用默认值1")
+            count = 1
+    except ValueError:
+        print("❌ 输入无效，使用默认值1")
+        count = 1
+    
+    # 自动生成文件名：模型+质量+月日时分
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%m%d_%H%M")
+    filename = f"{image_model}_{image_quality}_{timestamp}"
+    
+    print(f"\n🚀 正在生成{count}张图片...")
+    print(f"   使用模型: {image_model}")
+    print(f"   图像质量: {image_quality}")
+    print(f"   图像尺寸: {image_size}")
+    print(f"   图片描述: {prompt[:50]}...")
+    print(f"   文件前缀: {filename}")
+    
     try:
-        from functions.summarizer import check_and_update_repo
+        file_paths = generate_image(
+            prompt=prompt,
+            output_dir=None,  # 使用默认目录
+            filename=filename,
+            image_model=image_model,
+            count=count,
+            image_size=image_size,
+            image_quality=image_quality
+        )
         
-        print("\n🔄 正在更新期刊仓库...")
-        success = check_and_update_repo()
-        
-        if success:
-            print("✅ 期刊仓库更新完成")
-            return True
+        if file_paths:
+            print(f"\n✅ 成功生成{len(file_paths)}张图片:")
+            for path in file_paths:
+                print(f"  📷 {path}")
+            print("📁 输出位置: 独立图片/ 文件夹")
         else:
-            print("❌ 期刊仓库更新失败")
-            return False
-            
+            print("\n❌ 图片生成失败")
     except Exception as e:
-        print(f"❌ 更新过程出错: {e}")
-        return False
+        print(f"\n❌ 图片生成失败: {e}")
+    
+    # 询问是否继续生成
+    continue_choice = input("\n是否继续生成其他图片？(y/n): ").strip().lower()
+    if continue_choice in ['y', 'yes', '是']:
+        image_generation()  # 递归调用自己
 
-def analyze_local_files_and_summaries():
-    """分析本地期刊文件和已生成摘要的数量"""
-    try:
-        from functions.summarizer import MAGAZINE_CONFIG, REPO_PATH
-        import glob
-        
-        # 期刊配置
-        magazines_info = []
-        
-        for key, config in MAGAZINE_CONFIG.items():
-            magazine_name = config["title"]
-            
-            # 统计本地期刊文件数量
-            epub_count = 0
-            if os.path.exists(REPO_PATH):
-                magazine_path = os.path.join(REPO_PATH, config["base_dir"])
-                if os.path.exists(magazine_path):
-                    # 查找所有epub文件
-                    pattern = os.path.join(magazine_path, "**", "*.epub")
-                    epub_files = glob.glob(pattern, recursive=True)
-                    epub_count = len(epub_files)
-            
-            # 统计已生成摘要数量
-            summary_count = 0
-            summary_path = os.path.join("摘要汇总", config["title"])
-            if os.path.exists(summary_path):
-                json_files = glob.glob(os.path.join(summary_path, "*.json"))
-                summary_count = len(json_files)
-            
-            # 计算未处理数量
-            pending_count = max(0, epub_count - summary_count)
-            
-            magazines_info.append({
-                "key": key,
-                "name": magazine_name,
-                "epub_count": epub_count,
-                "summary_count": summary_count,
-                "pending_count": pending_count
-            })
-        
-        return magazines_info
-        
-    except Exception as e:
-        print(f"❌ 分析本地文件时出错: {e}")
-        return []
 
-def display_magazine_table(magazines_info):
-    """以表格形式显示期刊信息"""
-    print("\n" + "="*80)
-    print("📊 期刊文件和摘要统计表")
-    print("="*80)
-    
-    # 表头
-    print(f"{'序号':<4} {'期刊名称':<12} {'本地文件':<8} {'已生成摘要':<10} {'待处理':<8} {'状态':<10}")
-    print("-" * 80)
-    
-    total_epub = 0
-    total_summary = 0
-    total_pending = 0
-    
-    for i, info in enumerate(magazines_info, 1):
-        status = "✅ 完成" if info["pending_count"] == 0 else f"📝 待处理{info['pending_count']}篇"
-        
-        print(f"{i:<4} {info['name']:<12} {info['epub_count']:<8} {info['summary_count']:<10} {info['pending_count']:<8} {status:<10}")
-        
-        total_epub += info["epub_count"]
-        total_summary += info["summary_count"]
-        total_pending += info["pending_count"]
-    
-    print("-" * 80)
-    print(f"{'总计':<4} {'':<12} {total_epub:<8} {total_summary:<10} {total_pending:<8}")
-    print("="*80)
-    
-    return magazines_info
+
+
 
 def summarizer_generation():
     """期刊摘要生成工作流"""
@@ -411,7 +409,7 @@ def summarizer_generation():
     
     # 3. 分析本地文件和摘要数量
     print("\n🔍 正在分析本地期刊文件和摘要...")
-    magazines_info = analyze_local_files_and_summaries()
+    magazines_info = analyze_all_magazines()
     
     if not magazines_info:
         print("❌ 无法分析期刊信息，请检查期刊仓库")
@@ -426,10 +424,9 @@ def summarizer_generation():
         pending_text = f"(待处理 {info['pending_count']} 篇)" if info['pending_count'] > 0 else "(已完成)"
         print(f"  {i}. {info['name']} {pending_text}")
     print(f"  {len(magazines_info) + 1}. 处理所有待处理的期刊")
-    print(f"  {len(magazines_info) + 2}. 强制重新处理所有期刊")
     
     try:
-        choice = int(input(f"\n请选择 (1-{len(magazines_info) + 2}): "))
+        choice = int(input(f"\n请选择 (1-{len(magazines_info) + 1}): "))
     except ValueError:
         print("❌ 输入无效，退出摘要生成")
         return
@@ -449,11 +446,31 @@ def summarizer_generation():
         print("📁 输出位置: 摘要汇总/ 文件夹")
         
         try:
-            # 调用具体的处理函数
-            print("📋 请直接使用以下命令进行处理:")
-            print(f"python functions/summarizer.py {selected_magazine['key']}")
+            # 直接调用处理函数
+            result = process_magazine(selected_magazine['key'], "摘要汇总")
+            
+            if result and result.get('partially_successful', False):
+                # 有部分成功的处理
+                if result.get('all_successful', False):
+                    print(f"\n✅ {selected_magazine['name']} 处理完成!")
+                else:
+                    print(f"\n⚠️ {selected_magazine['name']} 部分处理完成")
+                
+                # 重新统计显示结果
+                print("\n📊 处理后统计:")
+                updated_info = analyze_all_magazines()
+                if updated_info:
+                    for info in updated_info:
+                        if info['key'] == selected_magazine['key']:
+                            print(f"  {info['name']}: 总共{info['epub_count']}篇，已处理{info['summary_count']}篇，剩余{info['pending_count']}篇")
+                            break
+            else:
+                print(f"\n❌ {selected_magazine['name']} 处理失败")
+                
         except Exception as e:
             print(f"❌ 处理失败: {e}")
+            import traceback
+            print(f"详细错误: {traceback.format_exc()}")
             
     elif choice == len(magazines_info) + 1:
         # 处理所有待处理的期刊
@@ -469,24 +486,47 @@ def summarizer_generation():
         
         confirm = input("\n确认开始批量处理？(y/n): ").strip().lower()
         if confirm in ['y', 'yes', '是']:
-            for magazine in pending_magazines:
-                print(f"\n📋 处理 {magazine['name']}，请使用:")
-                print(f"python functions/summarizer.py {magazine['key']}")
+            try:
+                fully_successful_count = 0
+                partially_successful_count = 0
+                failed_count = 0
+                
+                for i, magazine in enumerate(pending_magazines, 1):
+                    print(f"\n📋 [{i}/{len(pending_magazines)}] 正在处理 {magazine['name']}...")
+                    result = process_magazine(magazine['key'], "摘要汇总")
+                    
+                    if result and result.get('partially_successful', False):
+                        if result.get('all_successful', False):
+                            fully_successful_count += 1
+                            print(f"✅ {magazine['name']} 处理完成")
+                        else:
+                            partially_successful_count += 1
+                            print(f"⚠️ {magazine['name']} 部分处理完成")
+                    else:
+                        failed_count += 1
+                        print(f"❌ {magazine['name']} 处理失败")
+                
+                print(f"\n📊 批量处理完成:")
+                print(f"  ✅ 完全成功: {fully_successful_count} 个期刊")
+                print(f"  ⚠️ 部分成功: {partially_successful_count} 个期刊")
+                print(f"  ❌ 处理失败: {failed_count} 个期刊")
+                
+                if partially_successful_count > 0 or failed_count > 0:
+                    print(f"\n💡 提示: 部分失败通常是由于LLM响应不稳定导致，建议重新运行处理失败的期刊。")
+                
+                # 显示最终统计
+                if fully_successful_count > 0 or partially_successful_count > 0:
+                    print("\n📈 最新统计:")
+                    updated_info = analyze_all_magazines()
+                    if updated_info:
+                        display_magazine_table(updated_info)
+                        
+            except Exception as e:
+                print(f"❌ 批量处理失败: {e}")
+                import traceback
+                print(f"详细错误: {traceback.format_exc()}")
         else:
             print("❌ 取消批量处理")
-            
-    elif choice == len(magazines_info) + 2:
-        # 强制重新处理所有期刊
-        print("\n⚠️ 强制重新处理将覆盖所有现有摘要")
-        confirm = input("确认继续？(y/n): ").strip().lower()
-        
-        if confirm in ['y', 'yes', '是']:
-            print("\n🚀 开始强制重新处理所有期刊...")
-            print("📋 请依次使用以下命令:")
-            for magazine in magazines_info:
-                print(f"python functions/summarizer.py {magazine['key']} --force")
-        else:
-            print("❌ 取消强制处理")
     else:
         print("❌ 无效选择")
 
@@ -508,7 +548,7 @@ def main():
             content_generation()
         elif args.mode == "image":
             if args.prompt:
-                file_paths = generate_image(args.prompt, "../独立图片")
+                file_paths = generate_image(args.prompt, None)  # 使用默认目录
                 if file_paths:
                     print(f"✅ 图片生成成功: {file_paths[0]}")
                 else:

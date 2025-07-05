@@ -328,11 +328,13 @@ def _get_magazine_paths(magazine_type, base_output_dir):
     config = MAGAZINE_CONFIG[magazine_type]
     base_path = os.path.join(REPO_PATH, config['base_dir'])
     
-    # 使用相对路径的输出目录
+    # 修复输出目录路径计算
     if os.path.isabs(base_output_dir):
         magazine_output_dir = os.path.join(base_output_dir, config['title'])
     else:
-        magazine_output_dir = os.path.join(SCRIPT_DIR, base_output_dir, config['title'])
+        # 修复路径：从functions目录向上一级到项目根目录
+        project_root = os.path.dirname(SCRIPT_DIR)  # 向上一级到项目根目录
+        magazine_output_dir = os.path.join(project_root, base_output_dir, config['title'])
     
     # 确保输出目录存在
     os.makedirs(magazine_output_dir, exist_ok=True)
@@ -353,23 +355,28 @@ def _get_magazine_paths(magazine_type, base_output_dir):
                 valid_folders.append(dir_path)
                 all_epub_files.extend(epub_files)
     
-    # 处理EPUB文件，提取日期和生成预期的JSON路径
+    # 处理EPUB文件，提取日期和生成预期的JSON路径，去重处理
     epub_info = []
     unique_dates = set()
+    seen_dates = {}  # 用于跟踪已见过的日期
+    
     for epub_path in all_epub_files:
         filename = os.path.basename(epub_path)
         publication_date = parse_date_from_filename(filename, magazine_type)
         if publication_date:
             unique_dates.add(publication_date)
-            json_filename = f"{config['name']}_{publication_date.replace('-', '')}.json"
-            json_path = os.path.join(magazine_output_dir, json_filename)
-            epub_info.append({
-                'epub_path': epub_path,
-                'json_path': json_path,
-                'publication_date': publication_date,
-                'filename': filename
-            })
-            valid_epub_files.append(epub_path)
+            # 对重复日期进行去重，保留第一个找到的文件
+            if publication_date not in seen_dates:
+                json_filename = f"{config['name']}_{publication_date.replace('-', '')}.json"
+                json_path = os.path.join(magazine_output_dir, json_filename)
+                epub_info.append({
+                    'epub_path': epub_path,
+                    'json_path': json_path,
+                    'publication_date': publication_date,
+                    'filename': filename
+                })
+                valid_epub_files.append(epub_path)
+                seen_dates[publication_date] = True
     
     # 获取已存在的JSON文件
     existing_json_files = []
@@ -431,11 +438,35 @@ def process_magazine(magazine_type, base_output_dir="摘要汇总"):
         
         if not needs_processing:
             print("所有文件已经处理完毕，无需进行新的摘要处理\n")
+            # 如果没有需要处理的文件，仍然生成Word报告（如果有现有的JSON文件）
+            word_report_success = False
+            if existing_expected:
+                try:
+                    docx_filename = f"《{config['title']}》摘要汇总.docx"
+                    docx_path = os.path.join(paths['magazine_output_dir'], docx_filename)
+                    create_docx_report(list(existing_expected), docx_path, config['title'])
+                    print(f"Word报告已保存至{docx_path}")
+                    word_report_success = True
+                except Exception as e:
+                    print(f"创建Word文档时出错: {e}")
+            
+            return {
+                'total': 0,
+                'successful': 0,
+                'failed': 0,
+                'word_report': word_report_success,
+                'all_successful': True,
+                'partially_successful': True,
+                'already_completed': True
+            }
         else:
             print("开始进行摘要处理...\n")
         
         # 处理需要生成摘要的文件
         json_files = list(existing_expected)
+        successful_count = 0
+        failed_count = 0
+        
         for i, info in enumerate(needs_processing):
             try:
                 print(f"[{i+1}/{len(needs_processing)}] 正在处理{info['filename']}...")
@@ -443,6 +474,7 @@ def process_magazine(magazine_type, base_output_dir="摘要汇总"):
                 epub_text = extract_text_from_epub(info['epub_path'])
                 if not epub_text:
                     print(f"  从{info['epub_path']}提取文本失败，跳过")
+                    failed_count += 1
                     continue
                 
                 print("  正在使用Gemini 2.5 Pro进行摘要...")
@@ -452,22 +484,64 @@ def process_magazine(magazine_type, base_output_dir="摘要汇总"):
                     save_json_summary(summary_data, paths['magazine_output_dir'], os.path.basename(info['json_path']))
                     print(f"  摘要已保存至{info['json_path']}")
                     json_files.append(info['json_path'])
+                    successful_count += 1
                 else:
                     print(f"  为{info['filename']}生成摘要失败，跳过")
+                    failed_count += 1
             except Exception as e:
                 print(f"  处理{info.get('filename', '未知文件')}时出错: {e}")
+                failed_count += 1
                 continue
         
         # 创建Word报告
+        word_report_success = False
         if json_files:
             try:
                 docx_filename = f"《{config['title']}》摘要汇总.docx"
                 docx_path = os.path.join(paths['magazine_output_dir'], docx_filename)
                 create_docx_report(json_files, docx_path, config['title'])
+                print(f"Word报告已保存至{docx_path}")
+                word_report_success = True
             except Exception as e:
                 print(f"创建Word文档时出错: {e}")
+        
+        # 打印处理结果汇总
+        total_processed = len(needs_processing)
+        print(f"\n{'='*50}")
+        print(f"📊 {config['title']} 处理结果汇总:")
+        print(f"  📝 总计处理: {total_processed} 篇")
+        print(f"  ✅ 成功生成: {successful_count} 篇")
+        print(f"  ❌ 处理失败: {failed_count} 篇")
+        if word_report_success:
+            print(f"  📄 Word报告: 已生成")
+        
+        if failed_count > 0:
+            print(f"\n⚠️  部分文件处理失败，这通常是由于LLM响应不稳定导致的。")
+            print(f"   建议重新运行程序处理失败的文件。")
+        
+        print(f"{'='*50}")
+        
+        # 返回处理结果
+        return {
+            'total': total_processed,
+            'successful': successful_count,
+            'failed': failed_count,
+            'word_report': word_report_success,
+            'all_successful': failed_count == 0,
+            'partially_successful': successful_count > 0
+        }
+        
     except Exception as e:
         print(f"处理杂志{magazine_type}时发生错误: {e}")
+        return {
+            'total': 0,
+            'successful': 0,
+            'failed': 0,
+            'word_report': False,
+            'all_successful': False,
+            'partially_successful': False,
+            'error': str(e)
+        }
 
 def main():
     """主函数，处理命令行参数"""

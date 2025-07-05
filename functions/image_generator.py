@@ -77,7 +77,8 @@ def get_default_output_dir():
     grandparent_dir = os.path.dirname(parent_dir)  # 期刊系列内容生成目录
     return os.path.join(grandparent_dir, "独立图片")
 
-def generate_image(prompt, output_dir=None, filename=None, image_model="GPT-Image", count=1):
+def generate_image(prompt, output_dir=None, filename=None, image_model="GPT-Image", count=1, 
+                  image_size="1536x1024", image_quality="low"):
     """
     生成图片并保存到指定目录
     
@@ -123,8 +124,8 @@ def generate_image(prompt, output_dir=None, filename=None, image_model="GPT-Imag
                 model=os.getenv("AIHUBMIX_IMAGE_GENERATION_MODEL"),
                 prompt=f"{prompt}{IMAGE_STYLE_PROMPT}",
                 n=count,
-                size=IMAGE_SIZE,
-                quality=IMAGE_QUALITY,
+                size=image_size,
+                quality=image_quality,
                 moderation=IMAGE_MODERATION,
                 background=IMAGE_BACKGROUND
             )
@@ -140,7 +141,7 @@ def generate_image(prompt, output_dir=None, filename=None, image_model="GPT-Imag
                 single_response = ark_client.images.generate(
                     model=os.getenv("ARK_SeeDream_MODEL"),
                     prompt=f"{prompt}{IMAGE_STYLE_PROMPT}",
-                    size=IMAGE_SIZE,
+                    size=image_size,
                     response_format="url"
                 )
                 if single_response.data:
@@ -216,7 +217,8 @@ def generate_image(prompt, output_dir=None, filename=None, image_model="GPT-Imag
         print(f"图片生成失败: {e}")
         return []
 
-def generate_batch_images(prompts, output_dir=None, image_model="GPT-Image"):
+def generate_batch_images(prompts, output_dir=None, image_model="GPT-Image", 
+                         image_size="1536x1024", image_quality="low"):
     """
     批量生成图片
     
@@ -237,7 +239,7 @@ def generate_batch_images(prompts, output_dir=None, image_model="GPT-Image"):
     for i, prompt in enumerate(prompts):
         print(f"\n[{i+1}/{len(prompts)}] 正在处理: {prompt[:50]}...")
         filename = f"batch_image_{i+1}"
-        file_paths = generate_image(prompt, output_dir, filename, image_model)
+        file_paths = generate_image(prompt, output_dir, filename, image_model, 1, image_size, image_quality)
         if file_paths:
             successful_files.extend(file_paths)
         else:
@@ -367,22 +369,4 @@ def main():
         print("  python image_generator.py --interactive")
 
 if __name__ == "__main__":
-    
-    # 示例prompt，可以根据需要修改
-    prompt = "特朗普与他在华尔街和硅谷的密友在通过官商勾结，谋取私利。有视觉冲击的电影宣传海报质感，超高清展示，细节清晰，没有文字。"
-    
-    # 生成图片
-    file_paths = generate_image(
-        prompt=prompt, 
-        output_dir=None,  # 使用默认目录
-        filename="trump",
-        image_model="GPT-Image",
-        count=1
-    )
-    
-    if file_paths:
-        print(f"\n✅ 图片生成成功:")
-        for path in file_paths:
-            print(f"  - {path}")
-    else:
-        print("\n❌ 图片生成失败")
+    main()
